@@ -228,5 +228,119 @@
   /* Just next-step buttons. {buttons:[{label,send}]} */
   V.actions = function (d) { var box = host(); box.innerHTML = buttons(d.buttons); wireButtons(box, d.buttons || []); };
 
+  // ---- Production screens (photo-video, edu-video) ------------------------------
+  var CSS2 = '.v-row{display:flex;gap:12px;align-items:center;width:100%;text-align:left;height:auto;padding:10px 12px;border-radius:var(--radius,8px);white-space:normal}' +
+    '.v-row+.v-row{margin-top:6px}.v-grow{flex:1;min-width:0}' +
+    '.v-bar{height:6px;border-radius:3px;background:var(--border,rgba(128,128,128,.25));overflow:hidden;margin-top:6px}' +
+    '.v-bar>i{display:block;height:100%;background:' + R.purple[2] + '}' +
+    '.v-bad{background:var(--bg-danger,#fcebeb);color:var(--text-danger,#a32d2d)}.v-ok{background:var(--bg-success,#eaf3de);color:var(--text-success,#3b6d11)}.v-warn{background:var(--bg-warning,#faeeda);color:var(--text-warning,#854f0b)}' +
+    '.v-steps{display:flex;gap:3px;margin:10px 0 4px}.v-steps>i{flex:1;height:8px;border-radius:2px;background:var(--border,rgba(128,128,128,.25))}' +
+    '.v-steps>i.d{background:' + R.purple[2] + '}.v-steps>i.c{background:' + R.purple[3] + ';outline:2px solid ' + R.purple[1] + '}.v-steps>i.x{background:' + R.red[2] + '}' +
+    '.v-tbl{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}.v-tbl th{text-align:left;font-weight:500;color:var(--text-secondary,#8a8a8a);padding:6px 6px;border-bottom:0.5px solid var(--border,rgba(128,128,128,.35))}' +
+    '.v-tbl td{padding:7px 6px;vertical-align:top;border-bottom:0.5px solid var(--border,rgba(128,128,128,.2));overflow-wrap:anywhere}' +
+    '.v-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:8px 0}.v-fact{background:var(--surface-1,rgba(128,128,128,.08));border-radius:var(--radius,8px);padding:10px 12px}' +
+    '.v-fact b{display:block;font-size:18px;font-weight:500}.v-ask{display:flex;gap:8px;margin-top:10px}.v-ask input{flex:1;min-width:0}' +
+    '.v-cell{height:14px;border-radius:2px}.v-board td{padding:5px 3px}';
+  if (!el('v-css2')) { var s2 = document.createElement('style'); s2.id = 'v-css2'; s2.textContent = CSS2; document.head.appendChild(s2); }
+
+  function pill(text, kind) { return '<span class="v-pill' + (kind ? ' v-' + kind : '') + '">' + esc(text) + '</span>'; }
+  function fmtSecs(s) { s = Math.round(s || 0); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+  // A text box + Send that sends prefix + text (validated, flips to "✓ …").
+  function askBox(box, a) {
+    if (!a) return;
+    var w = document.createElement('div');
+    w.innerHTML = '<div class="v-ask"><input type="text" placeholder="' + esc(a.placeholder || '') + '"><button>' + esc(a.label || 'Send') + ' ↗</button></div><span class="v-err"></span>';
+    box.appendChild(w);
+    var inp = w.querySelector('input'), err = w.querySelector('.v-err');
+    inp.oninput = function () { err.textContent = ''; };
+    inp.onkeydown = function (e) { if (e.key === 'Enter') w.querySelector('button').click(); };
+    w.querySelector('button').onclick = function () {
+      var v = inp.value.trim(); if (!v) { err.textContent = 'Type something first'; return; }
+      w.innerHTML = '<p class="v-done">✓ ' + esc(v) + '</p>'; send(a.send + v);
+    };
+  }
+  function tail(box, d) {
+    var b = document.createElement('div'); b.innerHTML = buttons(d.buttons); box.appendChild(b); wireButtons(b, d.buttons || []);
+    askBox(box, d.ask);
+  }
+
+  /* Projects to resume. {items:[{title,sub,stage,step,steps,attention,send}], ask?:{placeholder,label,send}, more?:n} */
+  V.projects = function (d) {
+    var box = host(), it = d.items || [];
+    box.innerHTML = it.map(function (x, i) {
+      var pct = x.steps ? Math.round(100 * (x.step || 0) / x.steps) : 0;
+      return '<button class="v-row" data-p="' + i + '"><span class="v-grow"><span class="v-t">' + esc(x.title) + '</span> ' +
+        (x.attention ? pill(x.stage, 'bad') : pill(x.stage)) + (x.sub ? '<br><span class="v-sub">' + esc(x.sub) + '</span>' : '') +
+        '<span class="v-bar"><i style="width:' + pct + '%"></i></span></span><span aria-hidden="true">↗</span></button>';
+    }).join('') + (d.more ? '<p class="v-sub" style="margin-top:6px">' + esc(d.more) + '</p>' : '');
+    box.querySelectorAll('[data-p]').forEach(function (b) {
+      b.onclick = function () { var x = it[+b.getAttribute('data-p')]; box.innerHTML = '<p class="v-done">✓ ' + esc(x.title) + '</p>'; send(x.send); };
+    });
+    askBox(box, d.ask);
+  };
+
+  /* One project's place in its pipeline. {title, steps:[names], current:i, attention?, note?, facts?:[[k,v]], buttons?, ask?} */
+  V.status = function (d) {
+    var box = host(), st = d.steps || [], c = d.current || 0;
+    box.innerHTML = '<div class="v-card"><span class="v-t">' + esc(d.title) + '</span> ' + (d.attention ? pill(d.attention, 'bad') : pill(st[c] || '')) +
+      '<div class="v-steps">' + st.map(function (_, i) { return '<i class="' + (i < c ? 'd' : i === c ? (d.attention ? 'x' : 'c') : '') + '" title="' + esc(st[i]) + '"></i>'; }).join('') + '</div>' +
+      '<p class="v-sub">Step ' + (c + 1) + ' of ' + st.length + ': ' + esc(st[c] || '') + (st[c + 1] ? ' · next: ' + esc(st[c + 1]) : '') + '</p>' +
+      (d.note ? '<p class="v-sub" style="margin-top:6px">' + esc(d.note) + '</p>' : '') +
+      (d.facts && d.facts.length ? '<div class="v-facts">' + d.facts.map(function (f) { return '<div class="v-fact"><span class="v-sub">' + esc(f[0]) + '</span><b>' + esc(f[1]) + '</b></div>'; }).join('') + '</div>' : '') + '</div>';
+    tail(box, d);
+  };
+
+  /* Script to review. {rows:[{n,say,pic?,words?,secs}], total, measured?, buttons, ask} */
+  V.script = function (d) {
+    var box = host(), rows = d.rows || [], pic = rows.some(function (r) { return r.pic; }), wd = rows.some(function (r) { return r.words; });
+    box.innerHTML = '<p class="v-sub" style="margin-bottom:6px">' + rows.length + ' shots · ' + (d.measured ? '' : 'about ') + fmtSecs(d.total) + (d.measured ? ' (measured from the narration)' : ' (estimated)') + '</p>' +
+      '<div class="v-card" style="padding:4px 10px"><table class="v-tbl"><thead><tr><th style="width:28px">#</th><th>Narration</th>' + (pic ? '<th style="width:26%">Picture</th>' : '') + (wd ? '<th style="width:22%">On screen</th>' : '') + '<th style="width:44px">Sec</th></tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr><td>' + esc(r.n) + '</td><td>' + esc(r.say) + '</td>' + (pic ? '<td class="v-sub">' + esc(r.pic || '') + '</td>' : '') + (wd ? '<td>' + esc(r.words || '') + '</td>' : '') + '<td>' + round(r.secs, 1) + '</td></tr>'; }).join('') +
+      '</tbody></table></div>';
+    tail(box, d);
+  };
+
+  /* check_video.py result. {verdict, fail:[], warn:[], buttons, ask} */
+  V.checks = function (d) {
+    var box = host(), f = d.fail || [], w = d.warn || [];
+    box.innerHTML = '<div class="v-card">' + pill(d.verdict || '?', d.verdict === 'PASS' ? 'ok' : 'bad') + ' <span class="v-sub" style="display:inline">' + f.length + ' failed · ' + w.length + ' to read</span>' +
+      (f.length || w.length ? '<div style="margin-top:8px">' + f.map(function (x) { return '<p class="v-src">' + pill('FAIL', 'bad') + ' ' + esc(x) + '</p>'; }).join('') + w.map(function (x) { return '<p class="v-src">' + pill('WARN', 'warn') + ' ' + esc(x) + '</p>'; }).join('') + '</div>' : '<p class="v-sub" style="margin-top:8px">Nothing to fix.</p>') + '</div>';
+    tail(box, d);
+  };
+
+  /* Episodes x stages. {stages:[...], rows:[{n,title,stage,note,attention}], status?:{…V.status}, buttons, ask} */
+  V.board = function (d) {
+    var st = d.stages || [], rows = d.rows || [];
+    if (d.status) V.status(d.status);       // the series' phase on top, then the board
+    var box = document.createElement('div'); box.style.marginTop = d.status ? '12px' : '0'; host().appendChild(box);
+    var counts = {}; rows.forEach(function (r) { counts[r.stage] = (counts[r.stage] || 0) + 1; });
+    box.innerHTML = '<p class="v-sub" style="margin-bottom:6px">' + Object.keys(counts).map(function (k) { return counts[k] + ' ' + k; }).join(' · ') + '</p>' +
+      '<div class="v-card" style="padding:6px 10px"><table class="v-tbl v-board"><thead><tr><th style="width:38%">Episode</th>' + st.map(function (s) { return '<th style="font-size:11px;writing-mode:vertical-rl;transform:rotate(180deg);height:70px;padding:2px">' + esc(s) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      rows.map(function (r) {
+        var at = st.indexOf(r.stage);
+        return '<tr title="' + esc(r.note || '') + '"><td>' + esc(r.n) + '. ' + esc(r.title) + (r.attention ? ' ' + pill(r.stage, 'bad') : '') + '</td>' +
+          st.map(function (_, i) { var bg = r.attention ? (i === 0 ? R.red[2] : 'transparent') : (i < at ? R.purple[1] : i === at ? R.purple[2] : 'transparent'); return '<td><div class="v-cell" style="background:' + bg + '"></div></td>'; }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+    tail(host(), d);
+  };
+
+  /* Numbered list (an outline). {items:[{n,title,sub}], buttons, ask} */
+  V.list = function (d) {
+    var box = host();
+    box.innerHTML = '<div class="v-card">' + (d.items || []).map(function (x) {
+      return '<div class="v-chk" style="cursor:default"><span class="v-t" style="min-width:22px">' + esc(x.n) + '</span><span><span class="v-t">' + esc(x.title) + '</span>' + (x.sub ? '<br><span class="v-sub">' + esc(x.sub) + '</span>' : '') + '</span></div>';
+    }).join('') + '</div>';
+    tail(box, d);
+  };
+
+  /* A finished thing to approve. {title, facts:[[k,v]], notes:[], buttons, ask} */
+  V.summary = function (d) {
+    var box = host();
+    box.innerHTML = '<div class="v-card"><span class="v-t">' + esc(d.title || '') + '</span>' +
+      (d.facts && d.facts.length ? '<div class="v-facts">' + d.facts.map(function (f) { return '<div class="v-fact"><span class="v-sub">' + esc(f[0]) + '</span><b>' + esc(f[1]) + '</b></div>'; }).join('') + '</div>' : '') +
+      (d.notes || []).map(function (n) { return '<p class="v-src">' + pill('Note', 'warn') + ' ' + esc(n) + '</p>'; }).join('') + '</div>';
+    tail(box, d);
+  };
+
   window.V = V;
 })();
